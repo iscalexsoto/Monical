@@ -4,6 +4,8 @@ import com.devsoto.monical.data.auth.AuthManager
 import com.devsoto.monical.data.model.ParseSource
 import com.devsoto.monical.data.model.Receipt
 import com.devsoto.monical.data.model.ReceiptItem
+import com.devsoto.monical.data.model.ReturnStatus
+import com.devsoto.monical.data.model.UNCATEGORIZED
 import com.google.firebase.Firebase
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
@@ -45,6 +47,24 @@ class FirestoreReceiptRepository(
         awaitClose { registration.remove() }
     }
 
+    override suspend fun delete(id: String) {
+        if (id.isBlank()) return
+        val uid = auth.ensureSignedIn()
+        userReceipts(uid).document(id).delete().await()
+    }
+
+    override suspend fun markReturned(ids: List<String>) {
+        val toUpdate = ids.filter { it.isNotBlank() }
+        if (toUpdate.isEmpty()) return
+        val uid = auth.ensureSignedIn()
+        val collection = userReceipts(uid)
+        val batch = firestore.batch()
+        toUpdate.forEach { id ->
+            batch.update(collection.document(id), "returnStatus", ReturnStatus.RETURNED.name)
+        }
+        batch.commit().await()
+    }
+
     private fun userReceipts(uid: String) =
         firestore.collection(COLLECTION_USERS).document(uid).collection(COLLECTION_RECEIPTS)
 
@@ -54,6 +74,8 @@ class FirestoreReceiptRepository(
         "total" to total,
         "currency" to currency,
         "items" to items.map { it.toMap() },
+        "category" to category,
+        "returnStatus" to returnStatus.name,
         "rawText" to rawText,
         "source" to source.name,
         FIELD_CREATED_AT to createdAt,
@@ -64,6 +86,7 @@ class FirestoreReceiptRepository(
         "quantity" to quantity,
         "unitPrice" to unitPrice,
         "lineTotal" to lineTotal,
+        "isAdjustment" to isAdjustment,
     )
 
     @Suppress("UNCHECKED_CAST")
@@ -82,8 +105,13 @@ class FirestoreReceiptRepository(
                     quantity = (map["quantity"] as? Number)?.toDouble(),
                     unitPrice = (map["unitPrice"] as? Number)?.toDouble(),
                     lineTotal = (map["lineTotal"] as? Number)?.toDouble(),
+                    isAdjustment = map["isAdjustment"] as? Boolean ?: false,
                 )
             },
+            category = getString("category") ?: UNCATEGORIZED,
+            returnStatus = getString("returnStatus")
+                ?.let { runCatching { ReturnStatus.valueOf(it) }.getOrNull() }
+                ?: ReturnStatus.PENDING,
             rawText = getString("rawText").orEmpty(),
             source = getString("source")?.let { runCatching { ParseSource.valueOf(it) }.getOrNull() }
                 ?: ParseSource.MANUAL,

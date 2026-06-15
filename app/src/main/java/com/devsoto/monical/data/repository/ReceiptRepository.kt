@@ -14,4 +14,10 @@ interface ReceiptRepository {
 
     /** Emits the current user's receipts, newest first, updating in real time. */
     fun observeReceipts(): Flow<List<Receipt>>
+
+    /** Deletes a receipt by id for the current user. */
+    suspend fun delete(id: String)
+
+    /** Marks the given receipts as [com.devsoto.monical.data.model.ReturnStatus.RETURNED]. */
+    suspend fun markReturned(ids: List<String>)
 }

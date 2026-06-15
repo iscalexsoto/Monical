@@ -9,11 +9,15 @@ import com.devsoto.monical.AppContainer
 import com.devsoto.monical.MonicalApplication
 import com.devsoto.monical.data.auth.AuthManager
 import com.devsoto.monical.data.model.ParseSource
+import com.devsoto.monical.data.model.Receipt
 import com.devsoto.monical.data.model.ReceiptDraft
 import com.devsoto.monical.data.model.ReceiptItem
+import com.devsoto.monical.data.model.ReturnStatus
+import com.devsoto.monical.data.model.reconcileItems
 import com.devsoto.monical.data.ocr.MlKitTextRecognizer
 import com.devsoto.monical.data.parse.ReceiptParser
 import com.devsoto.monical.data.repository.ReceiptRepository
+import com.devsoto.monical.ui.review.ReviewMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,11 +25,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * Drives the whole scan flow and is shared between the capture and review screens so the
- * extracted [ReceiptDraft] survives navigation without serializing it through nav args.
+ * Drives the capture → review → save flow and is shared between the capture and review screens so
+ * the [ReceiptDraft] survives navigation without serializing it through nav args.
  *
- * Capture screen: [processImage]. Review screen: the `update*`/`addItem`/`removeItem`
- * editors and [save].
+ * "Total manda": every edit that affects the sum is followed by [reconcileItems] so a single locked
+ * "Ajuste" line keeps `sum(items) == total`.
  */
 class ScanViewModel(
     private val textRecognizer: MlKitTextRecognizer,
@@ -37,14 +41,34 @@ class ScanViewModel(
     private val _uiState = MutableStateFlow(ScanUiState())
     val uiState: StateFlow<ScanUiState> = _uiState.asStateFlow()
 
-    /** Runs OCR + parsing on the picked image. Emits [ScanUiState.draft] on success. */
+    // ── Flow entry points ────────────────────────────────────
+    /** FAB → Escanear: go to the capture screen. */
+    fun startScan() {
+        _uiState.value = ScanUiState(phase = ScanPhase.CAPTURE, mode = ReviewMode.SCAN)
+    }
+
+    /** FAB → Manual: open a blank draft in the review form. */
+    fun startManual() {
+        val draft = ReceiptDraft.blank()
+        _uiState.value = ScanUiState(phase = ScanPhase.REVIEW, mode = ReviewMode.MANUAL, draft = draft)
+    }
+
+    /** Tap a receipt on Home: open it for editing. */
+    fun editReceipt(receipt: Receipt) {
+        val draft = ReceiptDraft.fromReceipt(receipt).reconciled()
+        _uiState.value = ScanUiState(phase = ScanPhase.REVIEW, mode = ReviewMode.EDIT, draft = draft)
+    }
+
+    /** Runs OCR + parsing on the picked image, then moves to review. */
     fun processImage(uri: Uri) {
         _uiState.update { it.copy(phase = ScanPhase.PROCESSING, error = null) }
         viewModelScope.launch {
             try {
                 val rawText = textRecognizer.recognize(uri)
-                val draft = parser.parse(rawText)
-                _uiState.update { it.copy(phase = ScanPhase.REVIEW, draft = draft, error = null) }
+                val draft = parser.parse(rawText).reconciled()
+                _uiState.update {
+                    it.copy(phase = ScanPhase.REVIEW, mode = ReviewMode.SCAN, draft = draft, error = null)
+                }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(phase = ScanPhase.CAPTURE, error = e.message ?: "No se pudo leer la imagen")
@@ -53,10 +77,13 @@ class ScanViewModel(
         }
     }
 
+    // ── Draft editors ────────────────────────────────────────
     fun updateMerchant(value: String) = editDraft { it.copy(merchant = value) }
     fun updateCurrency(value: String) = editDraft { it.copy(currency = value) }
     fun updateDate(millis: Long?) = editDraft { it.copy(dateMillis = millis) }
     fun updateTotal(value: Double?) = editDraft { it.copy(total = value) }
+    fun updateCategory(value: String) = editDraft { it.copy(category = value) }
+    fun updateReturnStatus(value: ReturnStatus) = editDraft { it.copy(returnStatus = value) }
 
     fun addItem() = editDraft { it.copy(items = it.items + ReceiptItem(name = "")) }
 
@@ -68,17 +95,15 @@ class ScanViewModel(
         draft.copy(items = draft.items.toMutableList().also { it.removeAt(index) })
     }
 
-    /** Persists the current draft and moves to the [ScanPhase.SAVED] state. */
+    /** Persists the current draft and returns Home. Upserts when the draft already has an id. */
     fun save() {
         val draft = _uiState.value.draft ?: return
         _uiState.update { it.copy(isSaving = true, error = null) }
         viewModelScope.launch {
             try {
-                // The user edited the draft, so attribute the saved record to manual review.
-                val receipt = draft.copy(source = draft.source.takeIf { it == ParseSource.GEMINI }
-                    ?: ParseSource.MANUAL).toReceipt()
-                val id = repository.save(receipt)
-                _uiState.update { it.copy(isSaving = false, phase = ScanPhase.SAVED, savedId = id) }
+                val source = draft.source.takeIf { it == ParseSource.GEMINI } ?: ParseSource.MANUAL
+                repository.save(draft.copy(source = source).toReceipt())
+                reset()
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(isSaving = false, error = e.message ?: "No se pudo guardar el recibo")
@@ -87,17 +112,33 @@ class ScanViewModel(
         }
     }
 
-    /** Clears state to start a fresh scan. */
+    /** Deletes the receipt being edited (if persisted) and returns Home. */
+    fun deleteCurrent() {
+        val id = _uiState.value.draft?.id
+        viewModelScope.launch {
+            try {
+                if (!id.isNullOrBlank()) repository.delete(id)
+                reset()
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e.message ?: "No se pudo eliminar el recibo") }
+            }
+        }
+    }
+
+    /** Clears state back to Home. */
     fun reset() {
         _uiState.value = ScanUiState()
     }
 
     fun clearError() = _uiState.update { it.copy(error = null) }
 
+    private fun ReceiptDraft.reconciled(): ReceiptDraft =
+        copy(items = reconcileItems(total, items))
+
     private inline fun editDraft(transform: (ReceiptDraft) -> ReceiptDraft) {
         _uiState.update { state ->
             val draft = state.draft ?: return@update state
-            state.copy(draft = transform(draft))
+            state.copy(draft = transform(draft).reconciled())
         }
     }
 

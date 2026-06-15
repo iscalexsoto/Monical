@@ -17,3 +17,4 @@ local.properties
 # Firebase config is per-developer/project; supply your own from the Firebase console.
 google-services.json
 app/google-services.json
+/compose

@@ -1,6 +1,9 @@
 package com.devsoto.monical.ui.review
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,26 +11,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,143 +26,234 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.foundation.text.KeyboardOptions
+import com.devsoto.monical.data.model.RETURN_SHARE
 import com.devsoto.monical.data.model.ReceiptItem
+import com.devsoto.monical.ui.components.CalculatorField
+import com.devsoto.monical.ui.components.CategoryField
+import com.devsoto.monical.ui.components.CategoryPicker
+import com.devsoto.monical.ui.components.DateChips
+import com.devsoto.monical.ui.components.DatePicker
+import com.devsoto.monical.ui.components.FieldLabel
+import com.devsoto.monical.ui.components.OutlinedField
+import com.devsoto.monical.ui.components.PhysicalCalculator
+import com.devsoto.monical.ui.components.ReturnStatusSelector
+import com.devsoto.monical.ui.components.Rule
+import com.devsoto.monical.ui.components.RuleVariant
+import com.devsoto.monical.ui.components.pressable
 import com.devsoto.monical.ui.scan.ScanViewModel
-import java.time.Instant
-import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
+import com.devsoto.monical.ui.theme.Moni
+import com.devsoto.monical.ui.theme.TODAY
+import com.devsoto.monical.ui.theme.YESTERDAY
+import com.devsoto.monical.ui.theme.fmt
+import com.devsoto.monical.ui.theme.isToday
+import com.devsoto.monical.ui.theme.isYesterday
+import com.devsoto.monical.ui.theme.toLocalDate
+import com.devsoto.monical.ui.theme.toUtcMillis
 
-private val dateFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy")
+/** Which value the physical calculator is editing. */
+private sealed interface CalcTarget {
+    data object Total : CalcTarget
+    data class Item(val index: Int) : CalcTarget
+}
 
-/**
- * Lets the user review and correct the extracted data before saving it to Firestore.
- */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ReviewScreen(
-    viewModel: ScanViewModel,
-    modifier: Modifier = Modifier,
-) {
+fun ReviewScreen(viewModel: ScanViewModel, modifier: Modifier = Modifier) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val draft = uiState.draft ?: return
-    var showDatePicker by remember { mutableStateOf(false) }
+    val mode = uiState.mode
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-    ) {
-        Text("Revisa los datos", style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(16.dp))
+    var calcTarget by remember { mutableStateOf<CalcTarget?>(null) }
+    var dateOpen by remember { mutableStateOf(false) }
+    var catOpen by remember { mutableStateOf(false) }
 
-        OutlinedTextField(
-            value = draft.merchant.orEmpty(),
-            onValueChange = viewModel::updateMerchant,
-            label = { Text("Comercio") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
-        Spacer(Modifier.height(12.dp))
+    val date = draft.dateMillis?.toLocalDate()
+    val dateSelected = when {
+        date == null -> ""
+        isToday(date) -> "hoy"
+        isYesterday(date) -> "ayer"
+        else -> "custom"
+    }
 
-        OutlinedTextField(
-            value = draft.dateMillis?.let { formatDate(it) } ?: "",
-            onValueChange = {},
-            label = { Text("Fecha") },
-            placeholder = { Text("dd/mm/aaaa") },
-            readOnly = true,
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            trailingIcon = {
-                TextButton(onClick = { showDatePicker = true }) { Text("Elegir") }
-            },
-        )
-        Spacer(Modifier.height(12.dp))
+    Box(modifier.fillMaxSize().background(Moni.paper)) {
+        Column(Modifier.fillMaxSize()) {
+            ScreenHeader(mode.title, mode.sub, onBack = viewModel::reset)
 
-        Row(modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(
-                value = draft.total?.let { formatAmount(it) } ?: "",
-                onValueChange = { viewModel.updateTotal(it.replace(',', '.').toDoubleOrNull()) },
-                label = { Text("Total") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                modifier = Modifier.weight(2f),
-                singleLine = true,
-            )
-            Spacer(Modifier.width(12.dp))
-            OutlinedTextField(
-                value = draft.currency.orEmpty(),
-                onValueChange = viewModel::updateCurrency,
-                label = { Text("Moneda") },
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-            )
-        }
+            Column(
+                Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState())
+                    .padding(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 120.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                if (mode == ReviewMode.SCAN) {
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .background(Moni.accentWash, RoundedCornerShape(9.dp))
+                            .border(1.dp, Moni.accent, RoundedCornerShape(9.dp))
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("✦", fontFamily = Moni.font, fontSize = 15.sp, color = Moni.accent)
+                        Spacer(Modifier.width(9.dp))
+                        Text("Datos prellenados por Gemini. Verifica el total y la fecha antes de guardar.",
+                            fontFamily = Moni.font, fontSize = 11.5.sp, color = Moni.accentDark)
+                    }
+                }
 
-        Spacer(Modifier.height(20.dp))
-        HorizontalDivider()
-        Spacer(Modifier.height(12.dp))
+                DateChips(
+                    selected = dateSelected, customDate = if (dateSelected == "custom") date else null,
+                    onHoy = { viewModel.updateDate(TODAY.toUtcMillis()) },
+                    onAyer = { viewModel.updateDate(YESTERDAY.toUtcMillis()) },
+                    onCustom = { dateOpen = true },
+                )
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Productos", style = MaterialTheme.typography.titleMedium)
-            IconButton(onClick = viewModel::addItem) {
-                Icon(Icons.Filled.Add, contentDescription = "Añadir producto")
+                OutlinedField("Comercio", draft.merchant.orEmpty(), viewModel::updateMerchant, "Nombre del comercio")
+
+                CalculatorField("Total", draft.total) { calcTarget = CalcTarget.Total }
+
+                ReturnStatusSelector(draft.returnStatus, viewModel::updateReturnStatus)
+
+                if (draft.returnStatus == com.devsoto.monical.data.model.ReturnStatus.PENDING && draft.total != null) {
+                    Row(
+                        Modifier.fillMaxWidth().background(Moni.accentWash, RoundedCornerShape(9.dp))
+                            .border(1.dp, Moni.accentSoft, RoundedCornerShape(9.dp))
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Devolución (25%)", fontFamily = Moni.font, fontSize = 12.sp, color = Moni.accentDark)
+                        Text(fmt((draft.total ?: 0.0) * RETURN_SHARE), fontFamily = Moni.font,
+                            fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Moni.accent)
+                    }
+                }
+
+                CategoryField(draft.category) { catOpen = true }
+
+                ItemsSection(
+                    items = draft.items,
+                    onNameChange = { i, name -> viewModel.updateItem(i, draft.items[i].copy(name = name)) },
+                    onAmountTap = { i -> calcTarget = CalcTarget.Item(i) },
+                    onRemove = viewModel::removeItem,
+                    onAdd = viewModel::addItem,
+                )
+
+                if (mode == ReviewMode.EDIT) {
+                    Text("✕ eliminar gasto", fontFamily = Moni.font, fontSize = 12.sp,
+                        letterSpacing = 1.sp, color = Moni.accentDark, textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().pressable(viewModel::deleteCurrent).padding(12.dp))
+                }
             }
         }
 
-        draft.items.forEachIndexed { index, item ->
-            ItemRow(
-                item = item,
-                onChange = { viewModel.updateItem(index, it) },
-                onRemove = { viewModel.removeItem(index) },
-            )
-            Spacer(Modifier.height(8.dp))
-        }
-
-        Spacer(Modifier.height(24.dp))
-        Button(
-            onClick = viewModel::save,
-            enabled = !uiState.isSaving,
-            modifier = Modifier.fillMaxWidth(),
+        Box(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .background(Moni.paper).padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 18.dp),
         ) {
-            if (uiState.isSaving) {
-                CircularProgressIndicator(
-                    modifier = Modifier.height(20.dp),
-                    color = MaterialTheme.colorScheme.onPrimary,
-                )
-            } else {
-                Text("Guardar recibo")
+            Box(
+                Modifier.fillMaxWidth().pressable({ if (!uiState.isSaving) viewModel.save() })
+                    .background(Moni.accent, RoundedCornerShape(13.dp))
+                    .padding(17.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(if (uiState.isSaving) "GUARDANDO…" else "✓ GUARDAR GASTO",
+                    fontFamily = Moni.font, fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp, letterSpacing = 2.sp, color = Color.White)
             }
         }
 
         uiState.error?.let { error ->
-            Spacer(Modifier.height(12.dp))
-            Text(error, color = MaterialTheme.colorScheme.error)
+            Text(error, fontFamily = Moni.font, fontSize = 12.sp, color = Moni.accentDark,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 70.dp, start = 16.dp, end = 16.dp))
         }
     }
 
-    if (showDatePicker) {
-        val pickerState = rememberDatePickerState(initialSelectedDateMillis = draft.dateMillis)
-        DatePickerDialog(
-            onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.updateDate(pickerState.selectedDateMillis)
-                    showDatePicker = false
-                }) { Text("Aceptar") }
+    when (val t = calcTarget) {
+        CalcTarget.Total -> PhysicalCalculator(
+            initialValue = draft.total,
+            onConfirm = { viewModel.updateTotal(it); calcTarget = null },
+            onClose = { calcTarget = null },
+        )
+        is CalcTarget.Item -> PhysicalCalculator(
+            initialValue = draft.items.getOrNull(t.index)?.lineTotal,
+            onConfirm = { value ->
+                draft.items.getOrNull(t.index)?.let { viewModel.updateItem(t.index, it.copy(lineTotal = value)) }
+                calcTarget = null
             },
-            dismissButton = {
-                TextButton(onClick = { showDatePicker = false }) { Text("Cancelar") }
-            },
+            onClose = { calcTarget = null },
+        )
+        null -> {}
+    }
+    if (dateOpen) DatePicker(
+        value = date, onClose = { dateOpen = false },
+        onPick = { viewModel.updateDate(it.toUtcMillis()); dateOpen = false },
+    )
+    if (catOpen) CategoryPicker(
+        value = draft.category, onClose = { catOpen = false },
+        onPick = { viewModel.updateCategory(it); catOpen = false },
+    )
+}
+
+@Composable
+private fun ScreenHeader(title: String, sub: String, onBack: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().background(Moni.paper).padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(38.dp).pressable(onBack).border(1.5.dp, Moni.inkFaint, CircleShape),
+            contentAlignment = Alignment.Center,
         ) {
-            DatePicker(state = pickerState)
+            Text("‹", fontFamily = Moni.font, fontSize = 18.sp, color = Moni.ink)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(title.uppercase(), fontFamily = Moni.font, fontWeight = FontWeight.Bold,
+                fontSize = 16.sp, letterSpacing = 1.sp, color = Moni.ink)
+            Text(sub, fontFamily = Moni.font, fontSize = 11.sp, color = Moni.inkSoft,
+                modifier = Modifier.padding(top = 1.dp))
+        }
+    }
+    Rule()
+}
+
+@Composable
+private fun ItemsSection(
+    items: List<ReceiptItem>,
+    onNameChange: (Int, String) -> Unit,
+    onAmountTap: (Int) -> Unit,
+    onRemove: (Int) -> Unit,
+    onAdd: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        FieldLabel("Partidas")
+        Rule()
+        items.forEachIndexed { index, item ->
+            if (item.isAdjustment) {
+                AdjustmentRow(item)
+            } else {
+                ItemRow(
+                    item = item,
+                    onNameChange = { onNameChange(index, it) },
+                    onAmountTap = { onAmountTap(index) },
+                    onRemove = { onRemove(index) },
+                )
+            }
+            Rule(RuleVariant.Dot, Moni.inkFaint)
+        }
+        Row(
+            Modifier.fillMaxWidth().pressable(onAdd).padding(vertical = 12.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("＋ agregar partida", fontFamily = Moni.font, fontWeight = FontWeight.Bold,
+                fontSize = 12.5.sp, letterSpacing = 1.sp, color = Moni.accent)
         }
     }
 }
@@ -179,34 +261,53 @@ fun ReviewScreen(
 @Composable
 private fun ItemRow(
     item: ReceiptItem,
-    onChange: (ReceiptItem) -> Unit,
+    onNameChange: (String) -> Unit,
+    onAmountTap: () -> Unit,
     onRemove: () -> Unit,
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        OutlinedTextField(
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BasicTextField(
             value = item.name,
-            onValueChange = { onChange(item.copy(name = it)) },
-            label = { Text("Producto") },
-            modifier = Modifier.weight(2f),
+            onValueChange = onNameChange,
             singleLine = true,
+            textStyle = TextStyle(fontFamily = Moni.font, fontSize = 14.sp, color = Moni.ink),
+            cursorBrush = SolidColor(Moni.accent),
+            modifier = Modifier.weight(1f),
+            decorationBox = { inner ->
+                if (item.name.isEmpty()) {
+                    Text("Concepto", fontFamily = Moni.font, fontSize = 14.sp, color = Moni.inkFaint)
+                }
+                inner()
+            },
         )
         Spacer(Modifier.width(8.dp))
-        OutlinedTextField(
-            value = item.lineTotal?.let { formatAmount(it) } ?: "",
-            onValueChange = { onChange(item.copy(lineTotal = it.replace(',', '.').toDoubleOrNull())) },
-            label = { Text("Precio") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            modifier = Modifier.weight(1f),
-            singleLine = true,
-        )
-        IconButton(onClick = onRemove) {
-            Icon(Icons.Filled.Delete, contentDescription = "Eliminar producto")
+        Box(
+            Modifier.pressable(onAmountTap)
+                .border(1.dp, Moni.accent, RoundedCornerShape(7.dp))
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+        ) {
+            Text(fmt(item.lineTotal ?: 0.0), fontFamily = Moni.font, fontWeight = FontWeight.Bold,
+                fontSize = 13.sp, color = Moni.ink)
         }
+        Text("✕", fontFamily = Moni.font, fontSize = 14.sp, color = Moni.inkSoft,
+            modifier = Modifier.pressable(onRemove).padding(horizontal = 8.dp, vertical = 4.dp))
     }
 }
 
-private fun formatDate(millis: Long): String =
-    Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate().format(dateFormatter)
-
-private fun formatAmount(value: Double): String =
-    if (value == value.toLong().toDouble()) value.toLong().toString() else value.toString()
+@Composable
+private fun AdjustmentRow(item: ReceiptItem) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Ajuste", fontFamily = Moni.font, fontSize = 14.sp, color = Moni.inkSoft,
+            modifier = Modifier.weight(1f))
+        Text("(automático)", fontFamily = Moni.font, fontSize = 10.sp, color = Moni.inkFaint)
+        Spacer(Modifier.width(10.dp))
+        Text(fmt(item.lineTotal ?: 0.0), fontFamily = Moni.font, fontWeight = FontWeight.Bold,
+            fontSize = 14.sp, color = Moni.accent)
+    }
+}

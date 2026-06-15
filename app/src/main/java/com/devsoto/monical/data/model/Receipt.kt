@@ -23,7 +23,16 @@ data class Receipt(
     val total: Double? = null,
     val currency: String? = null,
     val items: List<ReceiptItem> = emptyList(),
+    val category: String = UNCATEGORIZED,
+    val returnStatus: ReturnStatus = ReturnStatus.PENDING,
     val rawText: String = "",
     val source: ParseSource = ParseSource.MANUAL,
     val createdAt: Long = System.currentTimeMillis(),
 )
+
+/** Portion of the total that is owed back (the "devolución"). */
+const val RETURN_SHARE = 0.25
+
+/** Amount to be returned for this receipt — non-zero only while [ReturnStatus.PENDING]. */
+fun Receipt.returnAmount(): Double =
+    if (returnStatus == ReturnStatus.PENDING) round2((total ?: 0.0) * RETURN_SHARE) else 0.0
