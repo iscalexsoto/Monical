@@ -4,10 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
-import com.devsoto.monical.AppContainer
 import com.devsoto.monical.MonicalApplication
-import com.devsoto.monical.data.model.Receipt
-import com.devsoto.monical.data.model.ReturnStatus
+import com.devsoto.monical.data.model.ReceiptSummary
 import com.devsoto.monical.data.repository.ReceiptRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -18,58 +16,48 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** State for the Home (receipt list) screen. */
+/** Collapsible sections on Home. */
+enum class HomeSection { PENDING, ARCHIVE }
+
+/** State for the Home (dashboard) screen, backed by the single summary document. */
 data class HomeUiState(
-    val receipts: List<Receipt> = emptyList(),
-    val sectionOpen: Map<ReturnStatus, Boolean> = DEFAULT_SECTIONS,
+    val summary: ReceiptSummary = ReceiptSummary(),
+    val sectionOpen: Map<HomeSection, Boolean> = DEFAULT_SECTIONS,
     val error: String? = null,
 ) {
     companion object {
         val DEFAULT_SECTIONS = mapOf(
-            ReturnStatus.PENDING to true,
-            ReturnStatus.RETURNED to true,
-            ReturnStatus.NONE to false,
+            HomeSection.PENDING to true,
+            HomeSection.ARCHIVE to false,
         )
     }
 }
 
-/** Observes the user's receipts and exposes Home actions. */
+/** Observes the user's dashboard summary (one document read) and exposes Home actions. */
 class HomeViewModel(private val repository: ReceiptRepository) : ViewModel() {
 
     private val sectionOpen = MutableStateFlow(HomeUiState.DEFAULT_SECTIONS)
     private val error = MutableStateFlow<String?>(null)
 
-    private val receipts = repository.observeReceipts()
-        .catch { e -> error.value = e.message ?: "No se pudieron cargar los recibos"; emit(emptyList()) }
+    private val summary = repository.observeSummary()
+        .catch { e -> error.value = e.message ?: "No se pudo cargar el resumen"; emit(ReceiptSummary()) }
 
     val uiState: StateFlow<HomeUiState> =
-        combine(receipts, sectionOpen, error) { r, open, err -> HomeUiState(r, open, err) }
+        combine(summary, sectionOpen, error) { s, open, err -> HomeUiState(s, open, err) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
-    fun toggleSection(status: ReturnStatus) {
-        sectionOpen.update { it + (status to !(it[status] ?: false)) }
+    fun toggleSection(section: HomeSection) {
+        sectionOpen.update { it + (section to !(it[section] ?: false)) }
     }
 
     fun markAllReturned() {
-        val pendingIds = uiState.value.receipts
-            .filter { it.returnStatus == ReturnStatus.PENDING }
-            .map { it.id }
+        val pendingIds = uiState.value.summary.active.map { it.id }
         if (pendingIds.isEmpty()) return
         viewModelScope.launch {
             try {
                 repository.markReturned(pendingIds)
             } catch (e: Exception) {
                 error.value = e.message ?: "No se pudo actualizar"
-            }
-        }
-    }
-
-    fun delete(id: String) {
-        viewModelScope.launch {
-            try {
-                repository.delete(id)
-            } catch (e: Exception) {
-                error.value = e.message ?: "No se pudo eliminar"
             }
         }
     }

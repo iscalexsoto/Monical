@@ -58,9 +58,9 @@ fun MonicalNavHost(
             val homeViewModel: HomeViewModel = viewModel(factory = HomeViewModel.Factory)
             HomeScreen(
                 viewModel = homeViewModel,
-                onScan = scanViewModel::startScan,
+                onImageCaptured = scanViewModel::processImage,
                 onManual = scanViewModel::startManual,
-                onOpenReceipt = scanViewModel::editReceipt,
+                onOpenReceipt = { id, archived -> scanViewModel.editReceipt(id, archived) },
             )
         }
         composable(Routes.CAPTURE) { ScanScreen(viewModel = scanViewModel) }

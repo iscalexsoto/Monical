@@ -31,7 +31,7 @@ data class Receipt(
 )
 
 /** Portion of the total that is owed back (the "devolución"). */
-const val RETURN_SHARE = 0.25
+const val RETURN_SHARE = 0.75
 
 /** Amount to be returned for this receipt — non-zero only while [ReturnStatus.PENDING]. */
 fun Receipt.returnAmount(): Double =

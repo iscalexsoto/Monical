@@ -7,15 +7,17 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
 import com.devsoto.monical.AppContainer
 import com.devsoto.monical.MonicalApplication
-import com.devsoto.monical.data.auth.AuthManager
 import com.devsoto.monical.data.model.ParseSource
-import com.devsoto.monical.data.model.Receipt
 import com.devsoto.monical.data.model.ReceiptDraft
 import com.devsoto.monical.data.model.ReceiptItem
 import com.devsoto.monical.data.model.ReturnStatus
 import com.devsoto.monical.data.model.reconcileItems
 import com.devsoto.monical.data.ocr.MlKitTextRecognizer
 import com.devsoto.monical.data.parse.ReceiptParser
+import com.devsoto.monical.data.refine.CorrectionDictionary
+import com.devsoto.monical.data.refine.ReceiptPostProcessor
+import com.devsoto.monical.data.refine.learnCorrections
+import com.devsoto.monical.data.repository.CorrectionRepository
 import com.devsoto.monical.data.repository.ReceiptRepository
 import com.devsoto.monical.ui.review.ReviewMode
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 
 /**
  * Drives the capture → review → save flow and is shared between the capture and review screens so
@@ -35,39 +38,60 @@ class ScanViewModel(
     private val textRecognizer: MlKitTextRecognizer,
     private val parser: ReceiptParser,
     private val repository: ReceiptRepository,
-    private val authManager: AuthManager,
+    private val correctionRepository: CorrectionRepository,
+    private val postProcessor: ReceiptPostProcessor,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ScanUiState())
     val uiState: StateFlow<ScanUiState> = _uiState.asStateFlow()
 
-    // ── Flow entry points ────────────────────────────────────
-    /** FAB → Escanear: go to the capture screen. */
-    fun startScan() {
-        _uiState.value = ScanUiState(phase = ScanPhase.CAPTURE, mode = ReviewMode.SCAN)
+    /** Learned corrections, loaded once and kept in memory so scans don't read Firestore. */
+    private var dictionary: CorrectionDictionary = CorrectionDictionary.EMPTY
+
+    init {
+        viewModelScope.launch {
+            dictionary = runCatching { correctionRepository.load() }.getOrDefault(CorrectionDictionary.EMPTY)
+        }
     }
 
+    // ── Flow entry points ────────────────────────────────────
     /** FAB → Manual: open a blank draft in the review form. */
     fun startManual() {
         val draft = ReceiptDraft.blank()
         _uiState.value = ScanUiState(phase = ScanPhase.REVIEW, mode = ReviewMode.MANUAL, draft = draft)
     }
 
-    /** Tap a receipt on Home: open it for editing. */
-    fun editReceipt(receipt: Receipt) {
-        val draft = ReceiptDraft.fromReceipt(receipt).reconciled()
-        _uiState.value = ScanUiState(phase = ScanPhase.REVIEW, mode = ReviewMode.EDIT, draft = draft)
+    /** Tap a receipt card on Home: fetch its full document (one read) and open it for editing. */
+    fun editReceipt(id: String, archived: Boolean = false) {
+        if (id.isBlank()) return
+        viewModelScope.launch {
+            try {
+                val receipt = repository.getReceipt(id, archived) ?: return@launch
+                val draft = ReceiptDraft.fromReceipt(receipt).reconciled()
+                _uiState.value = ScanUiState(phase = ScanPhase.REVIEW, mode = ReviewMode.EDIT, draft = draft)
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e.message ?: "No se pudo abrir el recibo") }
+            }
+        }
     }
 
-    /** Runs OCR + parsing on the picked image, then moves to review. */
+    /** Runs OCR + parsing on the picked image, post-processes it, then moves to review. */
     fun processImage(uri: Uri) {
         _uiState.update { it.copy(phase = ScanPhase.PROCESSING, error = null) }
         viewModelScope.launch {
             try {
                 val rawText = textRecognizer.recognize(uri)
-                val draft = parser.parse(rawText).reconciled()
+                val parsed = parser.parse(rawText)
+                val refined = postProcessor.process(parsed, dictionary, LocalDate.now())
                 _uiState.update {
-                    it.copy(phase = ScanPhase.REVIEW, mode = ReviewMode.SCAN, draft = draft, error = null)
+                    it.copy(
+                        phase = ScanPhase.REVIEW,
+                        mode = ReviewMode.SCAN,
+                        draft = refined.draft.reconciled(),
+                        rawParsedDraft = parsed,
+                        corrections = refined.changes,
+                        error = null,
+                    )
                 }
             } catch (e: Exception) {
                 _uiState.update {
@@ -79,7 +103,6 @@ class ScanViewModel(
 
     // ── Draft editors ────────────────────────────────────────
     fun updateMerchant(value: String) = editDraft { it.copy(merchant = value) }
-    fun updateCurrency(value: String) = editDraft { it.copy(currency = value) }
     fun updateDate(millis: Long?) = editDraft { it.copy(dateMillis = millis) }
     fun updateTotal(value: Double?) = editDraft { it.copy(total = value) }
     fun updateCategory(value: String) = editDraft { it.copy(category = value) }
@@ -97,18 +120,32 @@ class ScanViewModel(
 
     /** Persists the current draft and returns Home. Upserts when the draft already has an id. */
     fun save() {
-        val draft = _uiState.value.draft ?: return
+        val state = _uiState.value
+        val draft = state.draft ?: return
+        val rawParsed = state.rawParsedDraft
+        val isScan = state.mode == ReviewMode.SCAN
         _uiState.update { it.copy(isSaving = true, error = null) }
         viewModelScope.launch {
             try {
                 val source = draft.source.takeIf { it == ParseSource.GEMINI } ?: ParseSource.MANUAL
                 repository.save(draft.copy(source = source).toReceipt())
+                if (isScan && rawParsed != null) learnFrom(rawParsed, draft)
                 reset()
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(isSaving = false, error = e.message ?: "No se pudo guardar el recibo")
                 }
             }
+        }
+    }
+
+    /** Learns the user's edits (raw parser value → confirmed value) for next time. Best-effort. */
+    private suspend fun learnFrom(rawParsed: ReceiptDraft, finalDraft: ReceiptDraft) {
+        val learned = learnCorrections(rawParsed, finalDraft)
+        if (learned.isEmpty()) return
+        runCatching {
+            correctionRepository.learn(learned)
+            dictionary += learned
         }
     }
 
@@ -130,8 +167,6 @@ class ScanViewModel(
         _uiState.value = ScanUiState()
     }
 
-    fun clearError() = _uiState.update { it.copy(error = null) }
-
     private fun ReceiptDraft.reconciled(): ReceiptDraft =
         copy(items = reconcileItems(total, items))
 
@@ -152,7 +187,8 @@ class ScanViewModel(
                     textRecognizer = c.textRecognizer,
                     parser = c.parser,
                     repository = c.receiptRepository,
-                    authManager = c.authManager,
+                    correctionRepository = c.correctionRepository,
+                    postProcessor = c.postProcessor,
                 ) as T
             }
         }

@@ -1,5 +1,11 @@
 package com.devsoto.monical.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,10 +25,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,26 +45,36 @@ import com.devsoto.monical.ui.theme.fmt
 import com.devsoto.monical.ui.theme.isToday
 import java.time.LocalDate
 
-/** Full-screen scrim that hosts a custom bottom sheet. */
+/** Full-screen scrim that hosts a custom bottom sheet, sliding in from the bottom on appear. */
 @Composable
 private fun BottomSheetScrim(onDismiss: () -> Unit, content: @Composable () -> Unit) {
+    val state = remember { MutableTransitionState(false).apply { targetState = true } }
     Box(
-        Modifier.fillMaxSize().background(Color(0x73221C12)).clickable(
+        Modifier.fillMaxSize().clickable(
             interactionSource = remember { MutableInteractionSource() },
             indication = null,
         ) { onDismiss() },
         contentAlignment = Alignment.BottomCenter,
     ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-                .background(Moni.paper)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                ) {},
-        ) { content() }
+        AnimatedVisibility(state, enter = fadeIn(), exit = fadeOut()) {
+            Box(Modifier.fillMaxSize().background(Color(0x73221C12)))
+        }
+        AnimatedVisibility(
+            state,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                    .background(Moni.paper)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) {},
+            ) { content() }
+        }
     }
 }
 
@@ -76,14 +90,21 @@ private fun SheetGrabber() {
 
 /** Add sheet (FAB → choose capture method). */
 @Composable
-fun AddSheet(onScan: () -> Unit, onManual: () -> Unit, onClose: () -> Unit) {
+fun AddSheet(
+    onCamera: () -> Unit,
+    onGallery: () -> Unit,
+    onManual: () -> Unit,
+    onClose: () -> Unit,
+) {
     BottomSheetScrim(onClose) {
         Column(Modifier.padding(horizontal = 18.dp).padding(bottom = 24.dp)) {
             SheetGrabber()
             Text("— NUEVO GASTO —", fontFamily = Moni.font, fontSize = 12.sp, letterSpacing = 2.sp,
                 color = Moni.inkSoft, textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp))
-            AddOption("▣", "Escanear ticket", "Cámara → ML Kit → Gemini", Moni.accent, onScan)
+            AddOption("▣", "Escanear ticket", "Toma una foto", Moni.accent, onCamera)
+            Spacer(Modifier.height(12.dp))
+            AddOption("▦", "Escanear desde galería", "Elige una foto desde la galería", Moni.accent, onGallery)
             Spacer(Modifier.height(12.dp))
             AddOption("✎", "Capturar manual", "Escribir los datos a mano", Moni.ink, onManual)
         }
@@ -192,8 +213,8 @@ fun CategoryPicker(value: String, onPick: (String) -> Unit, onClose: () -> Unit)
 @Composable
 fun DatePicker(value: LocalDate?, onPick: (LocalDate) -> Unit, onClose: () -> Unit) {
     val init = value ?: TODAY
-    var view by remember { mutableStateOf(init.year to init.monthValue) } // (year, month 1..12)
-    val (vy, vm) = view
+    val view = remember { mutableStateOf(init.year to init.monthValue) } // (year, month 1..12)
+    val (vy, vm) = view.value
     val sel = value ?: TODAY
 
     val firstDow = LocalDate.of(vy, vm, 1).dayOfWeek.value % 7   // 0=Sun
@@ -203,7 +224,7 @@ fun DatePicker(value: LocalDate?, onPick: (LocalDate) -> Unit, onClose: () -> Un
     fun shift(n: Int) {
         var m = vm + n; var y = vy
         if (m < 1) { m = 12; y-- }; if (m > 12) { m = 1; y++ }
-        view = y to m
+        view.value = y to m
     }
 
     Dialog(onDismissRequest = onClose) {

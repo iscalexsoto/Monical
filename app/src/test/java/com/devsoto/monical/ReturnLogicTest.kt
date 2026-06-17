@@ -9,14 +9,14 @@ import org.junit.Test
 class ReturnLogicTest {
 
     @Test
-    fun pending_returns_25_percent() {
-        assertEquals(25.0, Receipt(total = 100.0, returnStatus = ReturnStatus.PENDING).returnAmount(), 1e-9)
+    fun pending_returns_75_percent() {
+        assertEquals(75.0, Receipt(total = 100.0, returnStatus = ReturnStatus.PENDING).returnAmount(), 1e-9)
     }
 
     @Test
     fun pending_rounds_to_two_decimals() {
-        // 432.50 * 0.25 = 108.125 → 108.13
-        assertEquals(108.13, Receipt(total = 432.50, returnStatus = ReturnStatus.PENDING).returnAmount(), 1e-9)
+        // 432.50 * 0.75 = 324.375 → 324.38
+        assertEquals(324.38, Receipt(total = 432.50, returnStatus = ReturnStatus.PENDING).returnAmount(), 1e-9)
     }
 
     @Test

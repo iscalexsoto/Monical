@@ -4,6 +4,9 @@ import android.content.Context
 import com.devsoto.monical.data.auth.AuthManager
 import com.devsoto.monical.data.ocr.MlKitTextRecognizer
 import com.devsoto.monical.data.parse.ReceiptParserRouter
+import com.devsoto.monical.data.refine.ReceiptPostProcessor
+import com.devsoto.monical.data.repository.CorrectionRepository
+import com.devsoto.monical.data.repository.FirestoreCorrectionRepository
 import com.devsoto.monical.data.repository.FirestoreReceiptRepository
 import com.devsoto.monical.data.repository.ReceiptRepository
 
@@ -18,4 +21,6 @@ class AppContainer(context: Context) {
     val parser: ReceiptParserRouter by lazy { ReceiptParserRouter() }
     val authManager: AuthManager by lazy { AuthManager() }
     val receiptRepository: ReceiptRepository by lazy { FirestoreReceiptRepository(authManager) }
+    val correctionRepository: CorrectionRepository by lazy { FirestoreCorrectionRepository(authManager) }
+    val postProcessor: ReceiptPostProcessor by lazy { ReceiptPostProcessor() }
 }

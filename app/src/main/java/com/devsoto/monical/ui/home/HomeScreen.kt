@@ -1,5 +1,9 @@
 package com.devsoto.monical.ui.home
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -25,57 +29,65 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.devsoto.monical.data.model.Receipt
-import com.devsoto.monical.data.model.ReturnStatus
+import com.devsoto.monical.data.model.MonthlyRollup
+import com.devsoto.monical.data.model.RETURN_SHARE
+import com.devsoto.monical.data.model.ReceiptCard
 import com.devsoto.monical.data.model.categoryCode
 import com.devsoto.monical.data.model.returnAmount
 import com.devsoto.monical.ui.components.AddSheet
 import com.devsoto.monical.ui.components.Barcode
+import com.devsoto.monical.ui.components.CategoryTag
 import com.devsoto.monical.ui.components.ConfirmDialog
 import com.devsoto.monical.ui.components.Rule
 import com.devsoto.monical.ui.components.RuleVariant
-import com.devsoto.monical.ui.components.Stamp
 import com.devsoto.monical.ui.components.TornEdge
-import com.devsoto.monical.ui.components.CategoryTag
 import com.devsoto.monical.ui.components.pressable
+import com.devsoto.monical.ui.capture.createImageUri
+import com.devsoto.monical.ui.theme.MON_FULL
 import com.devsoto.monical.ui.theme.Moni
+import com.devsoto.monical.ui.theme.TODAY
 import com.devsoto.monical.ui.theme.fmt
 import com.devsoto.monical.ui.theme.fmtLong
 import com.devsoto.monical.ui.theme.fmtShort
-import com.devsoto.monical.ui.theme.TODAY
 import com.devsoto.monical.ui.theme.toLocalDate
 
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel,
-    onScan: () -> Unit,
+    onImageCaptured: (Uri) -> Unit,
     onManual: () -> Unit,
-    onOpenReceipt: (Receipt) -> Unit,
+    onOpenReceipt: (String, Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var addOpen by remember { mutableStateOf(false) }
     var confirmOpen by remember { mutableStateOf(false) }
 
-    val pending = uiState.receipts.filter { it.returnStatus == ReturnStatus.PENDING }
-    val totalToCollect = pending.sumOf { it.returnAmount() }
+    val pendingCameraUri = remember { arrayOfNulls<Uri>(1) }
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        val uri = pendingCameraUri[0]
+        if (ok && uri != null) onImageCaptured(uri)
+    }
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) onImageCaptured(uri)
+    }
+
+    val summary = uiState.summary
 
     Box(modifier.fillMaxSize().background(Moni.desk)) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             HomeContent(
-                receipts = uiState.receipts,
-                totalToCollect = totalToCollect,
-                pendingCount = pending.size,
+                summary = summary,
                 open = uiState.sectionOpen,
                 onToggle = viewModel::toggleSection,
                 onOpenReceipt = onOpenReceipt,
@@ -86,12 +98,23 @@ fun HomeScreen(
         ExtendedFab(onClick = { addOpen = true }, modifier = Modifier.align(Alignment.BottomEnd))
 
         if (addOpen) AddSheet(
-            onScan = { addOpen = false; onScan() },
+            onCamera = {
+                addOpen = false
+                val uri = createImageUri(context)
+                pendingCameraUri[0] = uri
+                cameraLauncher.launch(uri)
+            },
+            onGallery = {
+                addOpen = false
+                galleryLauncher.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                )
+            },
             onManual = { addOpen = false; onManual() },
             onClose = { addOpen = false },
         )
         if (confirmOpen) ConfirmDialog(
-            count = pending.size, amount = totalToCollect,
+            count = summary.active.size, amount = summary.pendingRefund,
             onConfirm = { viewModel.markAllReturned(); confirmOpen = false },
             onCancel = { confirmOpen = false },
         )
@@ -115,23 +138,18 @@ private fun ExtendedFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
     }
 }
 
-private data class Section(val id: ReturnStatus, val accent: Color)
-
 @Composable
 private fun HomeContent(
-    receipts: List<Receipt>,
-    totalToCollect: Double,
-    pendingCount: Int,
-    open: Map<ReturnStatus, Boolean>,
-    onToggle: (ReturnStatus) -> Unit,
-    onOpenReceipt: (Receipt) -> Unit,
+    summary: com.devsoto.monical.data.model.ReceiptSummary,
+    open: Map<HomeSection, Boolean>,
+    onToggle: (HomeSection) -> Unit,
+    onOpenReceipt: (String, Boolean) -> Unit,
     onMarkAll: () -> Unit,
 ) {
-    val sections = listOf(
-        Section(ReturnStatus.PENDING, Moni.accent),
-        Section(ReturnStatus.RETURNED, Moni.paid),
-        Section(ReturnStatus.NONE, Moni.inkFaint),
-    )
+    val pending = summary.active
+    val months = summary.archivedMonthly.entries.sortedByDescending { it.key }
+    val archivedCount = months.sumOf { it.value.count }
+    val archivedTotal = months.sumOf { it.value.total }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
         Spacer(Modifier.height(8.dp))
@@ -139,34 +157,47 @@ private fun HomeContent(
             TornEdge(top = true)
             Column(Modifier.padding(horizontal = 20.dp)) {
                 ReceiptHeader()
-                TotalBlock(totalToCollect, pendingCount)
-                if (pendingCount > 0) MarkAllButton(onMarkAll)
+                TotalBlock(summary.pendingRefund, pending.size)
+                if (pending.isNotEmpty()) MarkAllButton(onMarkAll)
                 Rule(modifier = Modifier.padding(top = 10.dp))
 
-                sections.forEach { sec ->
-                    val items = receipts.filter { it.returnStatus == sec.id }
-                    val sub = if (sec.id == ReturnStatus.PENDING)
-                        items.sumOf { it.returnAmount() } else items.sumOf { it.total ?: 0.0 }
-                    val isOpen = open[sec.id] == true
-                    SectionHeader(
-                        mark = sec.id.mark, label = sec.id.label, count = items.size,
-                        subtotal = if (items.isNotEmpty()) sub else null, accent = sec.accent,
-                        open = isOpen, onToggle = { onToggle(sec.id) },
-                    )
-                    AnimatedVisibility(isOpen) {
-                        Column(Modifier.padding(bottom = 4.dp)) {
-                            if (items.isEmpty()) {
-                                Text("— sin movimientos —", fontFamily = Moni.font, fontSize = 12.sp,
-                                    color = Moni.inkFaint, textAlign = TextAlign.Center,
-                                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 12.dp))
-                            } else items.forEachIndexed { i, r ->
-                                ReceiptCard(r, onOpenReceipt)
-                                if (i < items.lastIndex) Rule(RuleVariant.Dot, Moni.inkFaint)
-                            }
+                // ── Pending ──
+                val pendingOpen = open[HomeSection.PENDING] == true
+                SectionHeader(
+                    mark = "※", label = "Por Devolver", count = pending.size,
+                    subtotal = pending.takeIf { it.isNotEmpty() }?.sumOf { it.returnAmount() },
+                    accent = Moni.accent, open = pendingOpen, onToggle = { onToggle(HomeSection.PENDING) },
+                )
+                AnimatedVisibility(pendingOpen) {
+                    Column(Modifier.padding(bottom = 4.dp)) {
+                        if (pending.isEmpty()) {
+                            EmptyRow()
+                        } else pending.forEachIndexed { i, card ->
+                            ReceiptCardRow(card) { onOpenReceipt(card.id, false) }
+                            if (i < pending.lastIndex) Rule(RuleVariant.Dot, Moni.inkFaint)
                         }
                     }
-                    Rule()
                 }
+                Rule()
+
+                // ── Archive (monthly rollups, cheap to keep & show) ──
+                val archiveOpen = open[HomeSection.ARCHIVE] == true
+                SectionHeader(
+                    mark = "✓", label = "Archivado", count = archivedCount,
+                    subtotal = months.takeIf { it.isNotEmpty() }?.let { archivedTotal },
+                    accent = Moni.paid, open = archiveOpen, onToggle = { onToggle(HomeSection.ARCHIVE) },
+                )
+                AnimatedVisibility(archiveOpen) {
+                    Column(Modifier.padding(bottom = 4.dp)) {
+                        if (months.isEmpty()) {
+                            EmptyRow()
+                        } else months.forEachIndexed { i, (key, rollup) ->
+                            MonthRow(key, rollup)
+                            if (i < months.lastIndex) Rule(RuleVariant.Dot, Moni.inkFaint)
+                        }
+                    }
+                }
+                Rule()
 
                 Column(
                     Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 6.dp),
@@ -186,17 +217,24 @@ private fun HomeContent(
 }
 
 @Composable
+private fun EmptyRow() {
+    Text("— sin movimientos —", fontFamily = Moni.font, fontSize = 12.sp,
+        color = Moni.inkFaint, textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 12.dp))
+}
+
+@Composable
 private fun ReceiptHeader() {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
         Text("MONICAL", fontFamily = Moni.font, fontWeight = FontWeight.Bold,
             fontSize = 27.sp, letterSpacing = 8.sp, color = Moni.ink)
-        Text("CONTROL DE GASTOS COMPARTIDOS", fontFamily = Moni.font,
+        Text("CONTROL DE GASTOS", fontFamily = Moni.font,
             fontSize = 10.5.sp, letterSpacing = 3.sp, color = Moni.inkSoft,
             modifier = Modifier.padding(top = 2.dp))
         Rule(modifier = Modifier.padding(vertical = 10.dp))
         Column(Modifier.fillMaxWidth()) {
-            MetaRow("CAJA 01", "CLIENTE: TÚ")
-            MetaRow("DEVOLUCIÓN", "25%")
+            MetaRow("CLIENTE", "Alejandro Soto Puerto")
+            MetaRow("DEVOLUCIÓN", "${(100 * RETURN_SHARE).toInt()}%")
             MetaRow(fmtLong(TODAY), "")
         }
         Rule(RuleVariant.Double, modifier = Modifier.padding(top = 9.dp))
@@ -278,25 +316,19 @@ private fun SectionHeader(
 }
 
 @Composable
-private fun ReceiptCard(r: Receipt, onOpen: (Receipt) -> Unit) {
-    val ret = r.returnAmount()
-    val faded = r.returnStatus == ReturnStatus.NONE
-    val merchant = r.merchant?.takeIf { it.isNotBlank() } ?: "Sin nombre"
-    val dateText = r.dateMillis?.let { fmtShort(it.toLocalDate()) } ?: "—"
+private fun ReceiptCardRow(card: ReceiptCard, onOpen: () -> Unit) {
+    val ret = card.returnAmount()
+    val merchant = card.merchant?.takeIf { it.isNotBlank() } ?: "Sin nombre"
+    val dateText = card.dateMillis?.let { fmtShort(it.toLocalDate()) } ?: "—"
     Column(
-        Modifier
-            .fillMaxWidth()
-            .pressable({ onOpen(r) })
-            .alpha(if (faded) 0.6f else 1f)
-            .padding(vertical = 10.dp),
+        Modifier.fillMaxWidth().pressable(onOpen).padding(vertical = 10.dp),
     ) {
         Row(verticalAlignment = Alignment.Bottom) {
-            CategoryTag(categoryCode(r.category))
+            CategoryTag(categoryCode(card.category))
             Spacer(Modifier.width(9.dp))
             Text(
                 merchant, fontFamily = Moni.font, fontWeight = FontWeight.SemiBold,
                 fontSize = 15.sp, color = Moni.ink, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                textDecoration = if (faded) TextDecoration.LineThrough else null,
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(9.dp))
@@ -304,24 +336,43 @@ private fun ReceiptCard(r: Receipt, onOpen: (Receipt) -> Unit) {
         }
         Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.Bottom) {
             Spacer(Modifier.width(39.dp))
-            Text(r.category, fontFamily = Moni.font, fontSize = 12.sp, color = Moni.inkSoft,
+            Text(card.category, fontFamily = Moni.font, fontSize = 12.sp, color = Moni.inkSoft,
                 modifier = Modifier.weight(1f))
-            Text(fmt(r.total ?: 0.0), fontFamily = Moni.font, fontWeight = FontWeight.Bold,
+            Text(fmt(card.total ?: 0.0), fontFamily = Moni.font, fontWeight = FontWeight.Bold,
                 fontSize = 16.sp, color = Moni.ink)
         }
-        when (r.returnStatus) {
-            ReturnStatus.PENDING -> Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.Bottom) {
-                Spacer(Modifier.width(39.dp))
-                Text("» a devolver (25%)", fontFamily = Moni.font, fontSize = 11.5.sp,
-                    color = Moni.accent, modifier = Modifier.weight(1f))
-                Text(fmt(ret), fontFamily = Moni.font, fontWeight = FontWeight.Bold,
-                    fontSize = 13.5.sp, color = Moni.accent)
-            }
-            ReturnStatus.RETURNED -> Row(Modifier.padding(top = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                Spacer(Modifier.width(39.dp))
-                Stamp("✓ pagado", color = Moni.paid, angle = -4f, fontSize = 9)
-            }
-            ReturnStatus.NONE -> {}
+        Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.Bottom) {
+            Spacer(Modifier.width(39.dp))
+            Text("» a devolver (${(100 * RETURN_SHARE).toInt()}%)", fontFamily = Moni.font, fontSize = 11.5.sp,
+                color = Moni.accent, modifier = Modifier.weight(1f))
+            Text(fmt(ret), fontFamily = Moni.font, fontWeight = FontWeight.Bold,
+                fontSize = 13.5.sp, color = Moni.accent)
         }
     }
+}
+
+@Composable
+private fun MonthRow(key: String, rollup: MonthlyRollup) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(monthLabel(key), fontFamily = Moni.font, fontWeight = FontWeight.SemiBold,
+                fontSize = 14.sp, color = Moni.ink)
+            Text("${rollup.count} ${if (rollup.count == 1) "gasto" else "gastos"} · devuelto ${fmt(rollup.refund)}",
+                fontFamily = Moni.font, fontSize = 11.sp, color = Moni.inkSoft,
+                modifier = Modifier.padding(top = 2.dp))
+        }
+        Text(fmt(rollup.total), fontFamily = Moni.font, fontWeight = FontWeight.Bold,
+            fontSize = 15.sp, color = Moni.inkSoft)
+    }
+}
+
+/** "2026-06" → "Junio 2026". Falls back to the raw key if it can't be parsed. */
+private fun monthLabel(key: String): String {
+    val parts = key.split("-")
+    val month = parts.getOrNull(1)?.toIntOrNull() ?: return key
+    val year = parts.getOrNull(0) ?: return key
+    return "${MON_FULL.getOrElse(month - 1) { key }} $year"
 }
