@@ -41,8 +41,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.devsoto.monical.data.model.MonthlyRollup
 import com.devsoto.monical.data.model.ReceiptCard
 import com.devsoto.monical.data.model.categoryCode
+import com.devsoto.monical.data.model.pendingRefund
 import com.devsoto.monical.data.model.returnAmount
-import com.devsoto.monical.data.model.round2
 import com.devsoto.monical.ui.components.AddSheet
 import com.devsoto.monical.ui.components.Barcode
 import com.devsoto.monical.ui.components.CategoryTag
@@ -117,7 +117,7 @@ fun HomeScreen(
             onClose = { addOpen = false },
         )
         if (confirmOpen) ConfirmDialog(
-            count = summary.active.size, amount = round2(summary.pendingTotal * uiState.returnShare),
+            count = summary.active.size, amount = summary.pendingRefund(uiState.returnShare),
             onConfirm = { viewModel.markAllReturned(); confirmOpen = false },
             onCancel = { confirmOpen = false },
         )
@@ -162,7 +162,7 @@ private fun HomeContent(
             TornEdge(top = true)
             Column(Modifier.padding(horizontal = 20.dp)) {
                 ReceiptHeader(share = share, onOpenSettings = onOpenSettings)
-                TotalBlock(round2(summary.pendingTotal * share), pending.size)
+                TotalBlock(summary.pendingRefund(share), pending.size)
                 if (pending.isNotEmpty()) MarkAllButton(onMarkAll)
                 Rule(modifier = Modifier.padding(top = 10.dp))
 

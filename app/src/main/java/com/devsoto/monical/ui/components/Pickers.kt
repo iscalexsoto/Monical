@@ -237,8 +237,11 @@ fun DatePicker(value: LocalDate?, onPick: (LocalDate) -> Unit, onClose: () -> Un
                     modifier = Modifier.pressable({ shift(-1) }).padding(6.dp))
                 Text("${MON_FULL[vm - 1]} $vy", fontFamily = Moni.font, fontWeight = FontWeight.Bold,
                     fontSize = 14.sp, letterSpacing = 1.sp, color = Moni.ink)
-                Text("›", fontFamily = Moni.font, fontSize = 18.sp, color = Moni.ink,
-                    modifier = Modifier.pressable({ shift(1) }).padding(6.dp))
+                // No future: disable advancing once the visible month is the current one or later.
+                val canGoNext = vy < TODAY.year || (vy == TODAY.year && vm < TODAY.monthValue)
+                Text("›", fontFamily = Moni.font, fontSize = 18.sp,
+                    color = if (canGoNext) Moni.ink else Moni.inkFaint,
+                    modifier = (if (canGoNext) Modifier.pressable({ shift(1) }) else Modifier).padding(6.dp))
             }
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth()) {
@@ -253,17 +256,19 @@ fun DatePicker(value: LocalDate?, onPick: (LocalDate) -> Unit, onClose: () -> Un
                         val d = week.getOrNull(idx)
                         Box(Modifier.weight(1f).aspectRatio(1f).padding(2.dp), contentAlignment = Alignment.Center) {
                             if (d != null) {
+                                val cellDate = LocalDate.of(vy, vm, d)
                                 val isSel = sel.year == vy && sel.monthValue == vm && sel.dayOfMonth == d
-                                val isTod = isToday(LocalDate.of(vy, vm, d))
+                                val isTod = isToday(cellDate)
+                                val future = cellDate.isAfter(TODAY) // not selectable
                                 Box(
                                     Modifier.fillMaxSize().clip(RoundedCornerShape(50))
                                         .background(if (isSel) Moni.accent else Color.Transparent)
                                         .border(1.5.dp, if (isTod && !isSel) Moni.accent else Color.Transparent, RoundedCornerShape(50))
-                                        .pressable({ onPick(LocalDate.of(vy, vm, d)) }),
+                                        .then(if (future) Modifier else Modifier.pressable({ onPick(cellDate) })),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Text("$d", fontFamily = Moni.font, fontSize = 13.sp,
-                                        color = if (isSel) Color.White else Moni.ink)
+                                        color = if (isSel) Color.White else if (future) Moni.inkFaint else Moni.ink)
                                 }
                             }
                         }

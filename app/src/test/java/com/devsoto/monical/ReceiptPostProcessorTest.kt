@@ -44,10 +44,26 @@ class ReceiptPostProcessorTest {
     }
 
     @Test
-    fun corrects_future_year_to_current() {
+    fun resets_future_year_to_today() {
         val draft = ReceiptDraft(dateMillis = millis(2028, 3, 10))
         val result = processor.process(draft, CorrectionDictionary.EMPTY, today)
-        assertEquals(millis(2026, 3, 10), result.draft.dateMillis)
+        assertEquals(millis(2026, 6, 16), result.draft.dateMillis)
+        assertEquals(CorrectionField.Date, result.changes.single().field)
+    }
+
+    @Test
+    fun resets_future_date_within_current_year_to_today() {
+        val draft = ReceiptDraft(dateMillis = millis(2026, 9, 1))
+        val result = processor.process(draft, CorrectionDictionary.EMPTY, today)
+        assertEquals(millis(2026, 6, 16), result.draft.dateMillis)
+        assertEquals(CorrectionField.Date, result.changes.single().field)
+    }
+
+    @Test
+    fun resets_too_old_date_to_today() {
+        val draft = ReceiptDraft(dateMillis = millis(2024, 12, 31))
+        val result = processor.process(draft, CorrectionDictionary.EMPTY, today)
+        assertEquals(millis(2026, 6, 16), result.draft.dateMillis)
         assertEquals(CorrectionField.Date, result.changes.single().field)
     }
 
@@ -56,6 +72,22 @@ class ReceiptPostProcessorTest {
         val draft = ReceiptDraft(dateMillis = millis(2026, 1, 5))
         val result = processor.process(draft, CorrectionDictionary.EMPTY, today)
         assertEquals(millis(2026, 1, 5), result.draft.dateMillis)
+        assertTrue(result.changes.isEmpty())
+    }
+
+    @Test
+    fun leaves_last_year_lower_bound_untouched() {
+        val draft = ReceiptDraft(dateMillis = millis(2025, 1, 1))
+        val result = processor.process(draft, CorrectionDictionary.EMPTY, today)
+        assertEquals(millis(2025, 1, 1), result.draft.dateMillis)
+        assertTrue(result.changes.isEmpty())
+    }
+
+    @Test
+    fun fills_missing_date_with_today_without_recording_a_change() {
+        val draft = ReceiptDraft(dateMillis = null)
+        val result = processor.process(draft, CorrectionDictionary.EMPTY, today)
+        assertEquals(millis(2026, 6, 16), result.draft.dateMillis)
         assertTrue(result.changes.isEmpty())
     }
 

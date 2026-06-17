@@ -23,12 +23,13 @@ fun monthKey(dateMillis: Long?, createdAt: Long): String =
 
 /**
  * Refund booked into the archive for a RETURNED receipt (zero otherwise), frozen at the share that
- * was stamped onto the receipt when it was archived. Legacy receipts without a stamp fall back to
+ * was stamped onto the receipt when it was archived. Computed over the [returnableBase] so a partial
+ * per-item devolución selection is frozen too. Legacy receipts without a stamp fall back to
  * [DEFAULT_RETURN_SHARE] so historical totals stay correct.
  */
 private fun archivedRefund(receipt: Receipt): Double =
     if (receipt.returnStatus == ReturnStatus.RETURNED)
-        round2((receipt.total ?: 0.0) * (receipt.returnShare ?: DEFAULT_RETURN_SHARE))
+        round2(returnableBase(receipt.total, receipt.items) * (receipt.returnShare ?: DEFAULT_RETURN_SHARE))
     else 0.0
 
 /** Rebuilds the whole summary from scratch — used for the one-time backfill/migration. */

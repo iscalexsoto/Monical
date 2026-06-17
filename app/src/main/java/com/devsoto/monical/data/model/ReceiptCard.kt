@@ -13,6 +13,11 @@ data class ReceiptCard(
     val currency: String? = null,
     val category: String = UNCATEGORIZED,
     val returnStatus: ReturnStatus = ReturnStatus.PENDING,
+    /**
+     * Precomputed [returnableBase] of the source receipt, so Home can show the correct refund
+     * without loading the receipt's `items`. `null` for legacy cards → falls back to [total].
+     */
+    val returnBase: Double? = null,
 )
 
 /** Project a full [Receipt] down to the home-list card. */
@@ -24,8 +29,9 @@ fun Receipt.toCard(): ReceiptCard = ReceiptCard(
     currency = currency,
     category = category,
     returnStatus = returnStatus,
+    returnBase = returnableBase(total, items),
 )
 
 /** Amount to be returned for this card at the given [share] — non-zero only while PENDING. */
 fun ReceiptCard.returnAmount(share: Double): Double =
-    if (returnStatus == ReturnStatus.PENDING) round2((total ?: 0.0) * share) else 0.0
+    if (returnStatus == ReturnStatus.PENDING) round2((returnBase ?: total ?: 0.0) * share) else 0.0

@@ -27,8 +27,9 @@ data class RefinedDraft(
 
 /**
  * Runs after the parser (Gemini/regex) and before the review screen. Applies learned
- * [CorrectionDictionary] entries (merchant + item names) and a conservative future-year date
- * rule. Corrections are applied automatically but reported in [RefinedDraft.changes] so the UI can
+ * [CorrectionDictionary] entries (merchant + item names) and a date-sanity rule (no future dates,
+ * nothing older than last year; otherwise reset to today). Corrections are applied automatically
+ * but reported in [RefinedDraft.changes] so the UI can
  * highlight them and offer a revert. Pure/JVM, no Android deps — mirrors the parser design note.
  */
 class ReceiptPostProcessor {
@@ -61,14 +62,18 @@ class ReceiptPostProcessor {
             }
         }
 
-        // 3. Future-year date ─ a year past the current one is almost certainly an OCR slip.
+        // 3. Date sanity ─ a ticket records a recent purchase, so the date must be realistic: not in
+        //    the future, and no older than last year. Anything else (or a missing date) becomes today.
+        val todayMillis = today.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
         var dateMillis = parsed.dateMillis
-        if (dateMillis != null) {
+        if (dateMillis == null) {
+            dateMillis = todayMillis // default fill, not a correction → no change recorded
+        } else {
             val date = Instant.ofEpochMilli(dateMillis).atZone(ZoneOffset.UTC).toLocalDate()
-            if (date.year > today.year) {
-                val fixed = date.withYear(today.year) // adjusts Feb-29 → Feb-28 when needed
-                changes += FieldCorrection(CorrectionField.Date, date.toString(), fixed.toString())
-                dateMillis = fixed.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+            val valid = !date.isAfter(today) && date.year >= today.year - 1
+            if (!valid) {
+                changes += FieldCorrection(CorrectionField.Date, date.toString(), today.toString())
+                dateMillis = todayMillis
             }
         }
 

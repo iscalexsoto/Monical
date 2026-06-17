@@ -6,6 +6,10 @@ package com.devsoto.monical.data.model
  *
  * [isAdjustment] marks the auto-generated reconciliation row (see [reconcileItems]); such a
  * row is locked in the UI and its [lineTotal] is recomputed, never edited by hand.
+ *
+ * [returnable] marks whether this line is included in the devolución when the receipt is PENDING
+ * (see [returnableBase]). Defaults to `true` so legacy items (and the adjustment row, which ignores
+ * the flag) count as included.
  */
 data class ReceiptItem(
     val name: String,
@@ -13,4 +17,5 @@ data class ReceiptItem(
     val unitPrice: Double? = null,
     val lineTotal: Double? = null,
     val isAdjustment: Boolean = false,
+    val returnable: Boolean = true,
 )

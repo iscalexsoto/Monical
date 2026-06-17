@@ -1,6 +1,7 @@
 package com.devsoto.monical
 
 import com.devsoto.monical.data.model.ADJUSTMENT_NAME
+import com.devsoto.monical.data.model.DISCOUNT_NAME
 import com.devsoto.monical.data.model.ReceiptItem
 import com.devsoto.monical.data.model.reconcileItems
 import org.junit.Assert.assertEquals
@@ -22,10 +23,13 @@ class ReconciliationTest {
     }
 
     @Test
-    fun total_less_than_sum_adds_negative_adjustment() {
+    fun total_less_than_sum_adds_negative_adjustment_named_discount() {
         val result = reconcileItems(100.0, listOf(item("A", 60.0), item("B", 60.0)))
         assertEquals(3, result.size)
-        assertEquals(-20.0, result.last().lineTotal!!, 1e-9)
+        val adj = result.last()
+        assertTrue(adj.isAdjustment)
+        assertEquals(DISCOUNT_NAME, adj.name)
+        assertEquals(-20.0, adj.lineTotal!!, 1e-9)
     }
 
     @Test

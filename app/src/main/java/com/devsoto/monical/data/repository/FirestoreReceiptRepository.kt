@@ -191,6 +191,7 @@ class FirestoreReceiptRepository(
         "unitPrice" to unitPrice,
         "lineTotal" to lineTotal,
         "isAdjustment" to isAdjustment,
+        "returnable" to returnable,
     )
 
     @Suppress("UNCHECKED_CAST")
@@ -210,6 +211,7 @@ class FirestoreReceiptRepository(
                     unitPrice = (map["unitPrice"] as? Number)?.toDouble(),
                     lineTotal = (map["lineTotal"] as? Number)?.toDouble(),
                     isAdjustment = map["isAdjustment"] as? Boolean ?: false,
+                    returnable = map["returnable"] as? Boolean ?: true,
                 )
             },
             category = getString("category") ?: UNCATEGORIZED,
@@ -236,6 +238,7 @@ class FirestoreReceiptRepository(
             returnStatus = getString("returnStatus")
                 ?.let { runCatching { ReturnStatus.valueOf(it) }.getOrNull() }
                 ?: ReturnStatus.PENDING,
+            returnBase = getDouble("returnBase"),
         )
     }
 
@@ -255,6 +258,7 @@ class FirestoreReceiptRepository(
         "currency" to currency,
         "category" to category,
         "returnStatus" to returnStatus.name,
+        "returnBase" to returnBase,
     )
 
     private fun MonthlyRollup.toMap(): Map<String, Any?> = mapOf(
@@ -283,6 +287,7 @@ class FirestoreReceiptRepository(
                     returnStatus = (m["returnStatus"] as? String)
                         ?.let { runCatching { ReturnStatus.valueOf(it) }.getOrNull() }
                         ?: ReturnStatus.PENDING,
+                    returnBase = (m["returnBase"] as? Number)?.toDouble(),
                 )
             },
             archivedMonthly = monthlyMaps.mapValues { (_, mm) ->

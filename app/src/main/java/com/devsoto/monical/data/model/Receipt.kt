@@ -37,8 +37,9 @@ data class Receipt(
 
 /**
  * Amount to be returned for this receipt at the given [share] — non-zero only while
- * [ReturnStatus.PENDING]. Used by the UI for live (pending) display; archived amounts are frozen
- * via [Receipt.returnShare] in `SummaryMath`.
+ * [ReturnStatus.PENDING]. Computed over the [returnableBase] so deselected items are excluded.
+ * Used by the UI for live (pending) display; archived amounts are frozen via [Receipt.returnShare]
+ * in `SummaryMath`.
  */
 fun Receipt.returnAmount(share: Double): Double =
-    if (returnStatus == ReturnStatus.PENDING) round2((total ?: 0.0) * share) else 0.0
+    if (returnStatus == ReturnStatus.PENDING) round2(returnableBase(total, items) * share) else 0.0

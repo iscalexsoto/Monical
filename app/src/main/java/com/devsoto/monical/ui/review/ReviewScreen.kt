@@ -33,6 +33,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.devsoto.monical.data.model.ReceiptItem
+import com.devsoto.monical.data.model.ReturnStatus
+import com.devsoto.monical.data.model.returnableBase
 import com.devsoto.monical.data.refine.CorrectionField
 import com.devsoto.monical.data.refine.FieldCorrection
 import com.devsoto.monical.ui.components.CalculatorField
@@ -125,7 +127,7 @@ fun ReviewScreen(viewModel: ScanViewModel, modifier: Modifier = Modifier) {
 
                 ReturnStatusSelector(draft.returnStatus, viewModel::updateReturnStatus)
 
-                if (draft.returnStatus == com.devsoto.monical.data.model.ReturnStatus.PENDING && draft.total != null) {
+                if (draft.returnStatus == ReturnStatus.PENDING && draft.total != null) {
                     Row(
                         Modifier.fillMaxWidth().background(Moni.accentWash, RoundedCornerShape(9.dp))
                             .border(1.dp, Moni.accentSoft, RoundedCornerShape(9.dp))
@@ -135,7 +137,8 @@ fun ReviewScreen(viewModel: ScanViewModel, modifier: Modifier = Modifier) {
                     ) {
                         Text("Devolución (${(100 * uiState.returnShare).toInt()}%)", fontFamily = Moni.font,
                             fontSize = 12.sp, color = Moni.accentDark)
-                        Text(fmt(draft.total * uiState.returnShare), fontFamily = Moni.font,
+                        Text(fmt(returnableBase(draft.total, draft.items) * uiState.returnShare),
+                            fontFamily = Moni.font,
                             fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Moni.accent)
                     }
                 }
@@ -144,8 +147,12 @@ fun ReviewScreen(viewModel: ScanViewModel, modifier: Modifier = Modifier) {
 
                 ItemsSection(
                     items = draft.items,
+                    selectable = draft.returnStatus == ReturnStatus.PENDING,
                     onNameChange = { i, name -> viewModel.updateItem(i, draft.items[i].copy(name = name)) },
                     onAmountTap = { i -> calcTarget.value = CalcTarget.Item(i) },
+                    onToggleReturnable = { i ->
+                        viewModel.updateItem(i, draft.items[i].copy(returnable = !draft.items[i].returnable))
+                    },
                     onRemove = viewModel::removeItem,
                     onAdd = viewModel::addItem,
                 )
@@ -233,8 +240,10 @@ private fun ScreenHeader(title: String, sub: String, onBack: () -> Unit) {
 @Composable
 private fun ItemsSection(
     items: List<ReceiptItem>,
+    selectable: Boolean,
     onNameChange: (Int, String) -> Unit,
     onAmountTap: (Int) -> Unit,
+    onToggleReturnable: (Int) -> Unit,
     onRemove: (Int) -> Unit,
     onAdd: () -> Unit,
 ) {
@@ -247,8 +256,10 @@ private fun ItemsSection(
             } else {
                 ItemRow(
                     item = item,
+                    selectable = selectable,
                     onNameChange = { onNameChange(index, it) },
                     onAmountTap = { onAmountTap(index) },
+                    onToggleReturnable = { onToggleReturnable(index) },
                     onRemove = { onRemove(index) },
                 )
             }
@@ -268,19 +279,29 @@ private fun ItemsSection(
 @Composable
 private fun ItemRow(
     item: ReceiptItem,
+    selectable: Boolean,
     onNameChange: (String) -> Unit,
     onAmountTap: () -> Unit,
+    onToggleReturnable: () -> Unit,
     onRemove: () -> Unit,
 ) {
+    // Only deselected items (when selecting is allowed) are dimmed; everything else uses normal ink.
+    val excluded = selectable && !item.returnable
+    val nameColor = if (excluded) Moni.inkFaint else Moni.ink
+    val amountColor = if (excluded) Moni.inkFaint else Moni.ink
     Row(
         Modifier.fillMaxWidth().padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (selectable) {
+            ReturnCheck(checked = item.returnable, onToggle = onToggleReturnable)
+            Spacer(Modifier.width(10.dp))
+        }
         BasicTextField(
             value = item.name,
             onValueChange = onNameChange,
             singleLine = true,
-            textStyle = TextStyle(fontFamily = Moni.font, fontSize = 14.sp, color = Moni.ink),
+            textStyle = TextStyle(fontFamily = Moni.font, fontSize = 14.sp, color = nameColor),
             cursorBrush = SolidColor(Moni.accent),
             modifier = Modifier.weight(1f),
             decorationBox = { inner ->
@@ -293,14 +314,30 @@ private fun ItemRow(
         Spacer(Modifier.width(8.dp))
         Box(
             Modifier.pressable(onAmountTap)
-                .border(1.dp, Moni.accent, RoundedCornerShape(7.dp))
+                .border(1.dp, if (excluded) Moni.inkFaint else Moni.accent, RoundedCornerShape(7.dp))
                 .padding(horizontal = 10.dp, vertical = 6.dp),
         ) {
             Text(fmt(item.lineTotal ?: 0.0), fontFamily = Moni.font, fontWeight = FontWeight.Bold,
-                fontSize = 13.sp, color = Moni.ink)
+                fontSize = 13.sp, color = amountColor)
         }
         Text("✕", fontFamily = Moni.font, fontSize = 14.sp, color = Moni.inkSoft,
             modifier = Modifier.pressable(onRemove).padding(horizontal = 8.dp, vertical = 4.dp))
+    }
+}
+
+/** Receipt-style checkbox: a small bordered box that fills with the accent and a "✓" when checked. */
+@Composable
+private fun ReturnCheck(checked: Boolean, onToggle: () -> Unit) {
+    Box(
+        Modifier.size(22.dp).pressable(onToggle)
+            .background(if (checked) Moni.accent else Color.Transparent, RoundedCornerShape(6.dp))
+            .border(1.5.dp, if (checked) Moni.accent else Moni.inkFaint, RoundedCornerShape(6.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (checked) {
+            Text("✓", fontFamily = Moni.font, fontWeight = FontWeight.Bold,
+                fontSize = 13.sp, color = Color.White)
+        }
     }
 }
 
@@ -368,11 +405,13 @@ private fun revertCorrection(
 
 @Composable
 private fun AdjustmentRow(item: ReceiptItem) {
+    // Negative reconciliation = a global discount the items don't itemize; positive = a generic fill.
+    val label = if ((item.lineTotal ?: 0.0) < 0) "Descuento" else "Ajuste"
     Row(
         Modifier.fillMaxWidth().padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("Ajuste", fontFamily = Moni.font, fontSize = 14.sp, color = Moni.inkSoft,
+        Text(label, fontFamily = Moni.font, fontSize = 14.sp, color = Moni.inkSoft,
             modifier = Modifier.weight(1f))
         Text("(automático)", fontFamily = Moni.font, fontSize = 10.sp, color = Moni.inkFaint)
         Spacer(Modifier.width(10.dp))

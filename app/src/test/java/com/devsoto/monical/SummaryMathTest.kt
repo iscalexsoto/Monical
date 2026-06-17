@@ -1,6 +1,7 @@
 package com.devsoto.monical
 
 import com.devsoto.monical.data.model.Receipt
+import com.devsoto.monical.data.model.ReceiptItem
 import com.devsoto.monical.data.model.ReceiptSummary
 import com.devsoto.monical.data.model.ReturnStatus
 import com.devsoto.monical.data.model.applyArchive
@@ -58,6 +59,24 @@ class SummaryMathTest {
             Receipt(id = "a", total = 100.0, dateMillis = date, returnStatus = ReturnStatus.RETURNED, returnShare = 0.80),
         )
         assertEquals(80.0, s.archivedMonthly.getValue("2026-06").refund, 1e-9)
+    }
+
+    @Test
+    fun applyArchive_freezes_partial_item_selection() {
+        val date = millis(2026, 6, 15)
+        // total 100, items A=60 (kept) + B=40 (deselected). Returnable base = 60 → refund 60 * 0.75 = 45.
+        val receipt = Receipt(
+            id = "a", total = 100.0, dateMillis = date, returnStatus = ReturnStatus.RETURNED,
+            returnShare = 0.75,
+            items = listOf(
+                ReceiptItem(name = "A", lineTotal = 60.0, returnable = true),
+                ReceiptItem(name = "B", lineTotal = 40.0, returnable = false),
+            ),
+        )
+        val s = applyArchive(ReceiptSummary(), receipt)
+        val roll = s.archivedMonthly.getValue("2026-06")
+        assertEquals(100.0, roll.total, 1e-9)
+        assertEquals(45.0, roll.refund, 1e-9)
     }
 
     @Test
