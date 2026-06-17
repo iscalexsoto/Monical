@@ -19,10 +19,12 @@ import com.devsoto.monical.data.refine.ReceiptPostProcessor
 import com.devsoto.monical.data.refine.learnCorrections
 import com.devsoto.monical.data.repository.CorrectionRepository
 import com.devsoto.monical.data.repository.ReceiptRepository
+import com.devsoto.monical.data.repository.SettingsRepository
 import com.devsoto.monical.ui.review.ReviewMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -40,6 +42,7 @@ class ScanViewModel(
     private val repository: ReceiptRepository,
     private val correctionRepository: CorrectionRepository,
     private val postProcessor: ReceiptPostProcessor,
+    private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ScanUiState())
@@ -51,6 +54,11 @@ class ScanViewModel(
     init {
         viewModelScope.launch {
             dictionary = runCatching { correctionRepository.load() }.getOrDefault(CorrectionDictionary.EMPTY)
+        }
+        viewModelScope.launch {
+            settingsRepository.observe()
+                .catch { /* keep the default share on error */ }
+                .collect { cfg -> _uiState.update { it.copy(returnShare = cfg.returnShare) } }
         }
     }
 
@@ -189,6 +197,7 @@ class ScanViewModel(
                     repository = c.receiptRepository,
                     correctionRepository = c.correctionRepository,
                     postProcessor = c.postProcessor,
+                    settingsRepository = c.settingsRepository,
                 ) as T
             }
         }

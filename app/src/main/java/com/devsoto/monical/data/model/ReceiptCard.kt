@@ -26,6 +26,6 @@ fun Receipt.toCard(): ReceiptCard = ReceiptCard(
     returnStatus = returnStatus,
 )
 
-/** Amount to be returned for this card — non-zero only while [ReturnStatus.PENDING]. */
-fun ReceiptCard.returnAmount(): Double =
-    if (returnStatus == ReturnStatus.PENDING) round2((total ?: 0.0) * RETURN_SHARE) else 0.0
+/** Amount to be returned for this card at the given [share] — non-zero only while PENDING. */
+fun ReceiptCard.returnAmount(share: Double): Double =
+    if (returnStatus == ReturnStatus.PENDING) round2((total ?: 0.0) * share) else 0.0

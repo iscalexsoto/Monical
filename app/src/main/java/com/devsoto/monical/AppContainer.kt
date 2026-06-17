@@ -8,7 +8,9 @@ import com.devsoto.monical.data.refine.ReceiptPostProcessor
 import com.devsoto.monical.data.repository.CorrectionRepository
 import com.devsoto.monical.data.repository.FirestoreCorrectionRepository
 import com.devsoto.monical.data.repository.FirestoreReceiptRepository
+import com.devsoto.monical.data.repository.FirestoreSettingsRepository
 import com.devsoto.monical.data.repository.ReceiptRepository
+import com.devsoto.monical.data.repository.SettingsRepository
 
 /**
  * Manual dependency container (the project doesn't use Hilt). Holds the singletons the UI
@@ -20,7 +22,8 @@ class AppContainer(context: Context) {
     val textRecognizer: MlKitTextRecognizer by lazy { MlKitTextRecognizer(appContext) }
     val parser: ReceiptParserRouter by lazy { ReceiptParserRouter() }
     val authManager: AuthManager by lazy { AuthManager() }
-    val receiptRepository: ReceiptRepository by lazy { FirestoreReceiptRepository(authManager) }
+    val settingsRepository: SettingsRepository by lazy { FirestoreSettingsRepository(authManager) }
+    val receiptRepository: ReceiptRepository by lazy { FirestoreReceiptRepository(authManager, settingsRepository) }
     val correctionRepository: CorrectionRepository by lazy { FirestoreCorrectionRepository(authManager) }
     val postProcessor: ReceiptPostProcessor by lazy { ReceiptPostProcessor() }
 }

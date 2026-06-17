@@ -21,9 +21,15 @@ private val MONTH_FMT: DateTimeFormatter =
 fun monthKey(dateMillis: Long?, createdAt: Long): String =
     MONTH_FMT.format(Instant.ofEpochMilli(dateMillis ?: createdAt))
 
-/** Refunded share booked into the archive for a RETURNED receipt (zero otherwise). */
+/**
+ * Refund booked into the archive for a RETURNED receipt (zero otherwise), frozen at the share that
+ * was stamped onto the receipt when it was archived. Legacy receipts without a stamp fall back to
+ * [DEFAULT_RETURN_SHARE] so historical totals stay correct.
+ */
 private fun archivedRefund(receipt: Receipt): Double =
-    if (receipt.returnStatus == ReturnStatus.RETURNED) round2((receipt.total ?: 0.0) * RETURN_SHARE) else 0.0
+    if (receipt.returnStatus == ReturnStatus.RETURNED)
+        round2((receipt.total ?: 0.0) * (receipt.returnShare ?: DEFAULT_RETURN_SHARE))
+    else 0.0
 
 /** Rebuilds the whole summary from scratch — used for the one-time backfill/migration. */
 fun buildSummary(receipts: List<Receipt>): ReceiptSummary {
@@ -69,10 +75,9 @@ fun applyDelete(summary: ReceiptSummary, receipt: Receipt): ReceiptSummary {
     return summary.copy(archivedMonthly = monthly, updatedAt = System.currentTimeMillis())
 }
 
-/** Replace the active list and recompute the pending running totals from it. */
+/** Replace the active list and recompute the pending running total from it. */
 private fun ReceiptSummary.withActive(active: List<ReceiptCard>): ReceiptSummary = copy(
     active = active,
     pendingTotal = round2(active.sumOf { it.total ?: 0.0 }),
-    pendingRefund = round2(active.sumOf { it.returnAmount() }),
     updatedAt = System.currentTimeMillis(),
 )

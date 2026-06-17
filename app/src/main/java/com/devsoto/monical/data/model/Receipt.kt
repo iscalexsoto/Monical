@@ -28,11 +28,17 @@ data class Receipt(
     val rawText: String = "",
     val source: ParseSource = ParseSource.MANUAL,
     val createdAt: Long = System.currentTimeMillis(),
+    /**
+     * The return share frozen onto this receipt when it was archived (RETURNED). `null` while
+     * PENDING — pending receipts use the current global share. See [DEFAULT_RETURN_SHARE].
+     */
+    val returnShare: Double? = null,
 )
 
-/** Portion of the total that is owed back (the "devolución"). */
-const val RETURN_SHARE = 0.75
-
-/** Amount to be returned for this receipt — non-zero only while [ReturnStatus.PENDING]. */
-fun Receipt.returnAmount(): Double =
-    if (returnStatus == ReturnStatus.PENDING) round2((total ?: 0.0) * RETURN_SHARE) else 0.0
+/**
+ * Amount to be returned for this receipt at the given [share] — non-zero only while
+ * [ReturnStatus.PENDING]. Used by the UI for live (pending) display; archived amounts are frozen
+ * via [Receipt.returnShare] in `SummaryMath`.
+ */
+fun Receipt.returnAmount(share: Double): Double =
+    if (returnStatus == ReturnStatus.PENDING) round2((total ?: 0.0) * share) else 0.0

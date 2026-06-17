@@ -92,7 +92,7 @@ fun OutlinedField(label: String, value: String, onChange: (String) -> Unit, plac
 @Composable
 fun CalculatorField(label: String, value: Double?, onOpen: () -> Unit) {
     val has = value != null
-    val display = if (has) fmt(value!!) else "$0.00"
+    val display = if (has) fmt(value) else "$0.00"
     Column(Modifier.fillMaxWidth()) {
         FieldLabel(label)
         Box(
@@ -113,6 +113,35 @@ fun CalculatorField(label: String, value: Double?, onOpen: () -> Unit) {
                         letterSpacing = 1.5.sp, color = Moni.accent)
                     Text(display, fontFamily = Moni.font, fontWeight = FontWeight.Bold,
                         fontSize = 23.sp, color = if (has) Moni.ink else Moni.inkFaint)
+                }
+            }
+        }
+    }
+}
+
+/** Tape-style field that opens the simplified percentage calculator. Shows the value as e.g. "75%". */
+@Composable
+fun PercentageField(label: String, percent: Int, onOpen: () -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        FieldLabel(label)
+        Box(
+            Modifier.fillMaxWidth().pressable(onOpen)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Moni.paperHi)
+                .border(1.5.dp, Moni.accent, RoundedCornerShape(10.dp)),
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(36.dp).rotate(-6f).background(Moni.accent, RoundedCornerShape(50)),
+                    contentAlignment = Alignment.Center) { CalcGlyph(size = 19.dp) }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("TOCA PARA AJUSTAR →", fontFamily = Moni.font, fontSize = 10.sp,
+                        letterSpacing = 1.5.sp, color = Moni.accent)
+                    Text("$percent%", fontFamily = Moni.font, fontWeight = FontWeight.Bold,
+                        fontSize = 23.sp, color = Moni.ink)
                 }
             }
         }

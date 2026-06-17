@@ -48,7 +48,7 @@ fun evalExpr(raw: String): Double? {
     return try {
         val v = evalArithmetic(s)
         if (v.isFinite()) round2(v) else null
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         null
     }
 }
@@ -87,7 +87,7 @@ private fun evalArithmetic(expr: String): Double {
     return output.last()
 }
 
-private object Calc {
+internal object Calc {
     val body = Color(0xFF39342C)
     val bevelHi = Color(0xFF5C5648)
     val trim = Color(0xFF26221C)
@@ -114,6 +114,7 @@ fun PhysicalCalculator(
     val live = evalExpr(expr)
     val bigText = if (live != null) fmtPlain(live) else "ERROR"
 
+    @Suppress("AssignedValueIsNeverRead")
     fun press(k: String) {
         when {
             k[0].isDigit() -> {
@@ -248,7 +249,7 @@ fun PhysicalCalculator(
 }
 
 @Composable
-private fun CalcKey(
+internal fun CalcKey(
     label: String, bg: Color, ink: Color, modifier: Modifier = Modifier,
     big: Boolean = false, onClick: () -> Unit,
 ) {

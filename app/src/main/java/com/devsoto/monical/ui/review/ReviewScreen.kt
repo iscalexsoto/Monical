@@ -32,7 +32,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.devsoto.monical.data.model.RETURN_SHARE
 import com.devsoto.monical.data.model.ReceiptItem
 import com.devsoto.monical.data.refine.CorrectionField
 import com.devsoto.monical.data.refine.FieldCorrection
@@ -134,8 +133,9 @@ fun ReviewScreen(viewModel: ScanViewModel, modifier: Modifier = Modifier) {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("Devolución (75%)", fontFamily = Moni.font, fontSize = 12.sp, color = Moni.accentDark)
-                        Text(fmt(draft.total * RETURN_SHARE), fontFamily = Moni.font,
+                        Text("Devolución (${(100 * uiState.returnShare).toInt()}%)", fontFamily = Moni.font,
+                            fontSize = 12.sp, color = Moni.accentDark)
+                        Text(fmt(draft.total * uiState.returnShare), fontFamily = Moni.font,
                             fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Moni.accent)
                     }
                 }

@@ -38,6 +38,7 @@ import kotlinx.coroutines.tasks.await
  */
 class FirestoreReceiptRepository(
     private val auth: AuthManager,
+    private val settings: SettingsRepository,
     private val firestore: FirebaseFirestore = Firebase.firestore,
 ) : ReceiptRepository {
 
@@ -74,6 +75,9 @@ class FirestoreReceiptRepository(
     override suspend fun save(receipt: Receipt): String {
         val uid = auth.ensureSignedIn()
         val archived = receipt.returnStatus != ReturnStatus.PENDING
+        // Freeze the current global share onto the receipt the moment it's archived; keep any
+        // existing stamp so re-saves don't retroactively re-rate it.
+        val frozenShare = if (archived) receipt.returnShare ?: settings.load().returnShare else receipt.returnShare
         val targetCol = if (archived) userArchive(uid) else userReceipts(uid)
         val ref = if (receipt.id.isBlank()) targetCol.document() else targetCol.document(receipt.id)
         val otherCol = if (archived) userReceipts(uid) else userArchive(uid)
@@ -85,7 +89,7 @@ class FirestoreReceiptRepository(
             val summary = txn.get(summaryRef).toSummaryOrEmpty()
             val counterpartExists = receipt.id.isNotBlank() && txn.get(counterpartRef).exists()
             // ── writes ──
-            val stored = receipt.copy(id = ref.id)
+            val stored = receipt.copy(id = ref.id, returnShare = frozenShare)
             val newSummary = if (archived) applyArchive(summary, stored) else applySave(summary, stored)
             txn.set(ref, if (archived) stored.toArchiveMap() else stored.toMap())
             txn.set(summaryRef, newSummary.toMap())
@@ -117,13 +121,15 @@ class FirestoreReceiptRepository(
         val toMove = ids.filter { it.isNotBlank() }
         if (toMove.isEmpty()) return
         val uid = auth.ensureSignedIn()
+        // Freeze the current global share onto each receipt as it's returned.
+        val share = settings.load().returnShare
         val summaryRef = summaryDoc(uid)
         firestore.runTransaction { txn ->
             // ── reads (all before writes) ──
             var summary = txn.get(summaryRef).toSummaryOrEmpty()
             val moves = toMove.mapNotNull { id ->
                 txn.get(userReceipts(uid).document(id)).toReceipt()
-                    ?.copy(id = id, returnStatus = ReturnStatus.RETURNED)
+                    ?.copy(id = id, returnStatus = ReturnStatus.RETURNED, returnShare = share)
             }
             // ── writes ──
             moves.forEach { r ->
@@ -171,6 +177,7 @@ class FirestoreReceiptRepository(
         "returnStatus" to returnStatus.name,
         "rawText" to rawText,
         "source" to source.name,
+        "returnShare" to returnShare,
         FIELD_CREATED_AT to createdAt,
     )
 
@@ -212,6 +219,7 @@ class FirestoreReceiptRepository(
             rawText = getString("rawText").orEmpty(),
             source = getString("source")?.let { runCatching { ParseSource.valueOf(it) }.getOrNull() }
                 ?: ParseSource.MANUAL,
+            returnShare = getDouble("returnShare"),
             createdAt = getLong(FIELD_CREATED_AT) ?: 0L,
         )
     }
@@ -234,7 +242,6 @@ class FirestoreReceiptRepository(
     // ── Summary (de)serialization ─────────────────────────────
     private fun ReceiptSummary.toMap(): Map<String, Any?> = mapOf(
         "pendingTotal" to pendingTotal,
-        "pendingRefund" to pendingRefund,
         "active" to active.map { it.toMap() },
         "archivedMonthly" to archivedMonthly.mapValues { it.value.toMap() },
         "updatedAt" to updatedAt,
@@ -265,7 +272,6 @@ class FirestoreReceiptRepository(
         val monthlyMaps = get("archivedMonthly") as? Map<String, Map<String, Any?>> ?: emptyMap()
         return ReceiptSummary(
             pendingTotal = getDouble("pendingTotal") ?: 0.0,
-            pendingRefund = getDouble("pendingRefund") ?: 0.0,
             active = activeMaps.map { m ->
                 ReceiptCard(
                     id = m["id"] as? String ?: "",

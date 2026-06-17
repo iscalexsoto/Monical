@@ -16,11 +16,14 @@ import com.devsoto.monical.ui.review.ReviewScreen
 import com.devsoto.monical.ui.scan.ScanPhase
 import com.devsoto.monical.ui.scan.ScanScreen
 import com.devsoto.monical.ui.scan.ScanViewModel
+import com.devsoto.monical.ui.settings.SettingsScreen
+import com.devsoto.monical.ui.settings.SettingsViewModel
 
 object Routes {
     const val HOME = "home"
     const val CAPTURE = "capture"
     const val REVIEW = "review"
+    const val SETTINGS = "settings"
 }
 
 /**
@@ -61,9 +64,14 @@ fun MonicalNavHost(
                 onImageCaptured = scanViewModel::processImage,
                 onManual = scanViewModel::startManual,
                 onOpenReceipt = { id, archived -> scanViewModel.editReceipt(id, archived) },
+                onOpenSettings = { navController.navigate(Routes.SETTINGS) },
             )
         }
         composable(Routes.CAPTURE) { ScanScreen(viewModel = scanViewModel) }
         composable(Routes.REVIEW) { ReviewScreen(viewModel = scanViewModel) }
+        composable(Routes.SETTINGS) {
+            val settingsViewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.Factory)
+            SettingsScreen(viewModel = settingsViewModel, onBack = { navController.popBackStack() })
+        }
     }
 }

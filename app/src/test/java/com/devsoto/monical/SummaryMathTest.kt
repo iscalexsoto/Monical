@@ -25,7 +25,7 @@ class SummaryMathTest {
         val s = applySave(ReceiptSummary(), Receipt(id = "a", total = 100.0, returnStatus = ReturnStatus.PENDING))
         assertEquals(1, s.active.size)
         assertEquals(100.0, s.pendingTotal, 1e-9)
-        assertEquals(75.0, s.pendingRefund, 1e-9) // 75% share
+        // Pending refund is derived at display time (pendingTotal * currentShare), not stored here.
     }
 
     @Test
@@ -47,6 +47,17 @@ class SummaryMathTest {
         assertEquals(1, roll.count)
         assertEquals(200.0, roll.total, 1e-9)
         assertEquals(150.0, roll.refund, 1e-9) // returned share counted
+    }
+
+    @Test
+    fun applyArchive_freezes_refund_at_the_receipts_own_share() {
+        val date = millis(2026, 6, 15)
+        // Stamped with an 80% share → refund is frozen at 80, not the 75% default.
+        val s = applyArchive(
+            ReceiptSummary(),
+            Receipt(id = "a", total = 100.0, dateMillis = date, returnStatus = ReturnStatus.RETURNED, returnShare = 0.80),
+        )
+        assertEquals(80.0, s.archivedMonthly.getValue("2026-06").refund, 1e-9)
     }
 
     @Test
